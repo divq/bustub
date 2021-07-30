@@ -15,6 +15,8 @@
 #include <list>
 #include <mutex>  // NOLINT
 #include <vector>
+#include <cstdint>
+#include <cstring>
 
 #include "buffer/replacer.h"
 #include "common/config.h"
@@ -47,6 +49,21 @@ class LRUReplacer : public Replacer {
 
  private:
   // TODO(student): implement me!
+
+  struct frame_status{
+    frame_id_t frame_id;
+    bool ref;
+    frame_status(frame_id_t f, bool i):frame_id(f), ref(i){}
+  };
+
+  std::list<frame_status> unpinned_frames;
+  std::list<frame_status>::iterator cursor;
+  std::list<frame_status>::iterator *iterlookup;
+  std::list<frame_status>::iterator flag;
+  // std::mutex unpinned_frames_lock;
+  // std::mutex cursor_lock;
+  std::mutex latch_;
+  size_t unpinned_size;
 };
 
 }  // namespace bustub
