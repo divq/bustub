@@ -93,7 +93,7 @@ Page *BufferPoolManager::FetchPageImpl(page_id_t page_id) {
       // page_table_lock.unlock();
     }
   } else {
-    if (pages_[it->second].pin_count_ == 0) {
+    if (pages_[it->second].pin_count_ == 0) {  // Mrhaha666的做法里面没有单列这种情况
       replacer_->Pin(it->second);
     }
     pages_[it->second].pin_count_++;
@@ -120,7 +120,7 @@ bool BufferPoolManager::UnpinPageImpl(page_id_t page_id, bool is_dirty) {
     // 所以我直接把它写入到磁盘也行。毕竟反正下一次用这个frame的时候也必须写入磁盘。
     // single_frame_lock[frame_to_unpin].lock();
     pages_[frame_to_unpin].is_dirty_ = pages_[frame_to_unpin].is_dirty_ || is_dirty;
-    if (pages_[frame_to_unpin].pin_count_ <= 0) {
+    if (pages_[frame_to_unpin].pin_count_ <= 0) {  // Mrhaha666没有考虑这种情况
       replacer_->Unpin(frame_to_unpin);
       // single_frame_lock[frame_to_unpin].unlock();
       return_flag = false;
@@ -176,8 +176,9 @@ Page *BufferPoolManager::NewPageImpl(page_id_t *page_id) {
 
     pages_[frame_id].ResetMemory();
     pages_[frame_id].page_id_ = *page_id;
-    pages_[frame_id].is_dirty_ = false;
+    pages_[frame_id].is_dirty_ = false;  ////  Mrhaha666: 这里没有写
     pages_[frame_id].pin_count_ = 1;
+    //  Mrhaha666: replacer_->Pin(frame_id);
     return_address = &(pages_[frame_id]);
   } else {
     //    free_list_lock.unlock();
@@ -200,6 +201,7 @@ Page *BufferPoolManager::NewPageImpl(page_id_t *page_id) {
       pages_[victim_frame].page_id_ = *page_id;
       pages_[victim_frame].is_dirty_ = false;
       pages_[victim_frame].pin_count_ = 1;
+      //  Mrhaha666: replacer_->Pin(frame_id);
       replacer_->Pin(victim_frame);
 
       // single_frame_lock[victim_frame].unlock();
@@ -236,8 +238,8 @@ bool BufferPoolManager::DeletePageImpl(page_id_t page_id) {
       pages_[frame_id].ResetMemory();
       pages_[frame_id].page_id_ = INVALID_PAGE_ID;
       pages_[frame_id].is_dirty_ = false;
-      pages_[frame_id].pin_count_ = 0;
-      replacer_->Pin(frame_id);
+      pages_[frame_id].pin_count_ = 0;  // Mrhaha666没写这个
+      replacer_->Pin(frame_id);         // Mrhaha666写的这个，有道理
       // single_frame_lock->unlock();
       //    free_list_lock.lock();
       free_list_.push_back(it->second);

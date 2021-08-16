@@ -59,9 +59,15 @@ class BPlusTreeLeafPage : public BPlusTreePage {
 
   // Split and Merge utility methods
   void MoveHalfTo(BPlusTreeLeafPage *recipient);
+  void MoveHalfTo(BPlusTreeLeafPage *recipient, BufferPoolManager *bufferPoolManager) { MoveHalfTo(recipient); }
   void MoveAllTo(BPlusTreeLeafPage *recipient);
   void MoveFirstToEndOf(BPlusTreeLeafPage *recipient);
   void MoveLastToFrontOf(BPlusTreeLeafPage *recipient);
+
+  void SetValueAtIndex(int index, const ValueType &value) { array[index].second = value; }
+
+  // BPlusTreeLeafPage *GetParentNode(Page *&parent_page_pointer);
+  KeyType GetMiddleKey() { return array[this->GetSize() / 2].first; }
 
  private:
   void CopyNFrom(MappingType *items, int size);

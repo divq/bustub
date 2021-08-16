@@ -62,7 +62,10 @@ class BPlusTree {
   void Print(BufferPoolManager *bpm) {
     ToString(reinterpret_cast<BPlusTreePage *>(bpm->FetchPage(root_page_id_)->GetData()), bpm);
   }
-
+  void Draw() {
+    std::string test("test.dot");
+    Draw(buffer_pool_manager_, test);
+  }
   void Draw(BufferPoolManager *bpm, const std::string &outf) {
     std::ofstream out(outf);
     out << "digraph G {" << std::endl;
@@ -116,6 +119,7 @@ class BPlusTree {
   KeyComparator comparator_;
   int leaf_max_size_;
   int internal_max_size_;
+  int tree_height;
 };
 
 }  // namespace bustub
