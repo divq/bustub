@@ -24,9 +24,7 @@ LRUReplacer::LRUReplacer(size_t num_pages) {
   cursor = unpinned_frames.begin();
 }
 
-LRUReplacer::~LRUReplacer() {
-  delete[] iterlookup;
-}
+LRUReplacer::~LRUReplacer() { delete[] iterlookup; }
 
 bool LRUReplacer::Victim(frame_id_t *frame_id) {
   bool find_one = false;

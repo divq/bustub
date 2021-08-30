@@ -32,6 +32,7 @@ void B_PLUS_TREE_INTERNAL_PAGE_TYPE::Init(page_id_t page_id, page_id_t parent_id
   this->SetMaxSize(max_size);
   this->SetParentPageId(parent_id);
   this->SetPageId(page_id);
+  this->SetNextPageId(INVALID_PAGE_ID);
 }
 /*
  * Helper method to get/set the key associated with input "index"(a.k.a
@@ -85,7 +86,7 @@ ValueType B_PLUS_TREE_INTERNAL_PAGE_TYPE::ValueAt(int index) const {
 INDEX_TEMPLATE_ARGUMENTS
 ValueType B_PLUS_TREE_INTERNAL_PAGE_TYPE::Lookup(const KeyType &key, const KeyComparator &comparator) const {
   ValueType result = INVALID_PAGE_ID;
-  if (comparator(key, array[1].first) == -1) {
+  if (comparator(key, array[1].first) == -1) {  // 这个地方，对于只有一个节点的情况怎么办？？to-do
     result = array[0].second;
   } else if (comparator(key, array[this->GetSize() - 1].first) != -1) {
     result = array[this->GetSize() - 1].second;
@@ -169,8 +170,9 @@ void B_PLUS_TREE_INTERNAL_PAGE_TYPE::MoveHalfTo(BPlusTreeInternalPage *recipient
 }
 
 /* Copy entries into me, starting from {items} and copy {size} entries.
- * Since it is an internal page, for all entries (pages) moved, their parents page now changes to me.
- * So I need to 'adopt' them by changing their parent page id, which needs to be persisted with BufferPoolManger
+ * Since it is an internal page, for all entries (pages) moved, their parents
+ * page now changes to me. So I need to 'adopt' them by changing their parent
+ * page id, which needs to be persisted with BufferPoolManger
  */
 INDEX_TEMPLATE_ARGUMENTS
 void B_PLUS_TREE_INTERNAL_PAGE_TYPE::CopyNFrom(MappingType *items, int size, BufferPoolManager *buffer_pool_manager) {
@@ -178,8 +180,10 @@ void B_PLUS_TREE_INTERNAL_PAGE_TYPE::CopyNFrom(MappingType *items, int size, Buf
   for (int i = 0; i < size; i++) {
     page = reinterpret_cast<B_PLUS_TREE_INTERNAL_PAGE_TYPE *>(buffer_pool_manager->FetchPage(items[i].second));
     page->SetParentPageId(this->GetPageId());
+    buffer_pool_manager->UnpinPage(items[i].second, true);
     array[i + this->GetSize()] = items[i];
   }
+  this->IncreaseSize(size);
 }
 
 /*****************************************************************************
@@ -211,13 +215,27 @@ ValueType B_PLUS_TREE_INTERNAL_PAGE_TYPE::RemoveAndReturnOnlyChild() { return IN
 /*
  * Remove all of key & value pairs from this page to "recipient" page.
  * The middle_key is the separation key you should get from the parent. You need
- * to make sure the middle key is added to the recipient to maintain the invariant.
- * You also need to use BufferPoolManager to persist changes to the parent page id for those
- * pages that are moved to the recipient
+ * to make sure the middle key is added to the recipient to maintain the
+ * invariant. You also need to use BufferPoolManager to persist changes to the
+ * parent page id for those pages that are moved to the recipient
  */
 INDEX_TEMPLATE_ARGUMENTS
 void B_PLUS_TREE_INTERNAL_PAGE_TYPE::MoveAllTo(BPlusTreeInternalPage *recipient, const KeyType &middle_key,
-                                               BufferPoolManager *buffer_pool_manager) {}
+                                               BufferPoolManager *buffer_pool_manager) {
+  array[0].first = middle_key;
+  page_id_t new_parent_id = recipient->GetPageId();
+  Page *child_page{nullptr};
+
+  for (int i = 0; i < this->GetSize(); i++) {
+    child_page = buffer_pool_manager->FetchPage(array[i].second);
+    B_PLUS_TREE_INTERNAL_PAGE_TYPE *child_node =
+        reinterpret_cast<B_PLUS_TREE_INTERNAL_PAGE_TYPE *>(child_page->GetData());
+    child_node->SetParentPageId(new_parent_id);
+    buffer_pool_manager->UnpinPage(array[0].second, false);
+  }
+  recipient->CopyNFrom(array, this->GetSize(), buffer_pool_manager);
+  this->SetSize(0);
+}
 
 /*****************************************************************************
  * REDISTRIBUTE
@@ -226,37 +244,71 @@ void B_PLUS_TREE_INTERNAL_PAGE_TYPE::MoveAllTo(BPlusTreeInternalPage *recipient,
  * Remove the first key & value pair from this page to tail of "recipient" page.
  *
  * The middle_key is the separation key you should get from the parent. You need
- * to make sure the middle key is added to the recipient to maintain the invariant.
- * You also need to use BufferPoolManager to persist changes to the parent page id for those
- * pages that are moved to the recipient
+ * to make sure the middle key is added to the recipient to maintain the
+ * invariant. You also need to use BufferPoolManager to persist changes to the
+ * parent page id for those pages that are moved to the recipient
  */
 INDEX_TEMPLATE_ARGUMENTS
 void B_PLUS_TREE_INTERNAL_PAGE_TYPE::MoveFirstToEndOf(BPlusTreeInternalPage *recipient, const KeyType &middle_key,
-                                                      BufferPoolManager *buffer_pool_manager) {}
+                                                      BufferPoolManager *buffer_pool_manager) {
+  array[0].first = middle_key;
+  recipient->CopyFirstFrom(array[0], buffer_pool_manager);
+  for (int i = 0; i < this->GetSize() - 1; i++) {
+    array[i] = array[i + 1];
+  }
+  this->IncreaseSize(-1);
+}
 
 /* Append an entry at the end.
- * Since it is an internal page, the moved entry(page)'s parent needs to be updated.
- * So I need to 'adopt' it by changing its parent page id, which needs to be persisted with BufferPoolManger
+ * Since it is an internal page, the moved entry(page)'s parent needs to be
+ * updated. So I need to 'adopt' it by changing its parent page id, which needs
+ * to be persisted with BufferPoolManger
  */
 INDEX_TEMPLATE_ARGUMENTS
-void B_PLUS_TREE_INTERNAL_PAGE_TYPE::CopyLastFrom(const MappingType &pair, BufferPoolManager *buffer_pool_manager) {}
+void B_PLUS_TREE_INTERNAL_PAGE_TYPE::CopyLastFrom(const MappingType &pair, BufferPoolManager *buffer_pool_manager) {
+  for (int i = this->GetSize(); i > 0; i--) {
+    array[i] = array[i - 1];
+  }
+  array[0] = pair;
+  Page *child_page = buffer_pool_manager->FetchPage(pair.second);
+  B_PLUS_TREE_INTERNAL_PAGE_TYPE *child_node =
+      reinterpret_cast<B_PLUS_TREE_INTERNAL_PAGE_TYPE *>(child_page->GetData());
+  child_node->SetParentPageId(this->GetPageId());
+  buffer_pool_manager->UnpinPage(pair.second, true);
+  this->IncreaseSize(1);
+}
 
 /*
  * Remove the last key & value pair from this page to head of "recipient" page.
- * You need to handle the original dummy key properly, e.g. updating recipient’s array to position the middle_key at
- * the right place. You also need to use BufferPoolManager to persist changes to the parent page id for those pages
+ * You need to handle the original dummy key properly, e.g. updating recipient’s
+ * array to position the middle_key at the right place. You also need to use
+ * BufferPoolManager to persist changes to the parent page id for those pages
  * that are moved to the recipient
  */
 INDEX_TEMPLATE_ARGUMENTS
 void B_PLUS_TREE_INTERNAL_PAGE_TYPE::MoveLastToFrontOf(BPlusTreeInternalPage *recipient, const KeyType &middle_key,
-                                                       BufferPoolManager *buffer_pool_manager) {}
+                                                       BufferPoolManager *buffer_pool_manager) {
+  recipient->CopyLastFrom(array[this->GetSize() - 1], buffer_pool_manager);
+  recipient->SetKeyAt(1, middle_key);
+  this->IncreaseSize(-1);
+}
 
 /* Append an entry at the beginning.
- * Since it is an internal page, the moved entry(page)'s parent needs to be updated.
- * So I need to 'adopt' it by changing its parent page id, which needs to be persisted with BufferPoolManger
+ * Since it is an internal page, the moved entry(page)'s parent needs to be
+ * updated. So I need to 'adopt' it by changing its parent page id, which needs
+ * to be persisted with BufferPoolManger
  */
 INDEX_TEMPLATE_ARGUMENTS
-void B_PLUS_TREE_INTERNAL_PAGE_TYPE::CopyFirstFrom(const MappingType &pair, BufferPoolManager *buffer_pool_manager) {}
+void B_PLUS_TREE_INTERNAL_PAGE_TYPE::CopyFirstFrom(const MappingType &pair, BufferPoolManager *buffer_pool_manager) {
+  array[this->GetSize()].first = pair.first;
+  array[this->GetSize()].second = pair.second;
+  Page *child_page = buffer_pool_manager->FetchPage(pair.second);
+  B_PLUS_TREE_INTERNAL_PAGE_TYPE *child_node =
+      reinterpret_cast<B_PLUS_TREE_INTERNAL_PAGE_TYPE *>(child_page->GetData());
+  child_node->SetParentPageId(this->GetPageId());
+  buffer_pool_manager->UnpinPage(pair.second, true);
+  this->IncreaseSize(1);
+}
 
 // valuetype for internalNode should be page id_t
 template class BPlusTreeInternalPage<GenericKey<4>, page_id_t, GenericComparator<4>>;
@@ -264,4 +316,63 @@ template class BPlusTreeInternalPage<GenericKey<8>, page_id_t, GenericComparator
 template class BPlusTreeInternalPage<GenericKey<16>, page_id_t, GenericComparator<16>>;
 template class BPlusTreeInternalPage<GenericKey<32>, page_id_t, GenericComparator<32>>;
 template class BPlusTreeInternalPage<GenericKey<64>, page_id_t, GenericComparator<64>>;
+
+// find the index where array[index].second includes the key
+INDEX_TEMPLATE_ARGUMENTS
+int B_PLUS_TREE_INTERNAL_PAGE_TYPE::FindIndex(const KeyType &key, const KeyComparator &comparator) const {
+  int index = -1;
+  assert(this->GetSize() > 1);
+  if (comparator(array[1].first, key) == 1) {
+    index = 0;
+  } else if (comparator(key, array[this->GetSize() - 1].first) != -1) {
+    index = this->GetSize() - 1;
+  } else {
+    for (int i = 1; i < this->GetSize() - 1; i++) {
+      if (comparator(key, array[i].first) != -1 && comparator(array[i + 1].first, key) == 1) {
+        index = i;
+        break;
+      }
+    }
+  }
+  return index;
+}
+// INDEX_TEMPLATE_ARGUMENTS
+// page_id_t B_PLUS_TREE_INTERNAL_PAGE_TYPE::GetPreviousPageId(BufferPoolManager
+// *buffer_pool_manager) {
+//   assert(!this->IsRootPage());
+//   page_id_t parent_page_id = this->GetParentPageId();
+//   page_id_t rightmost_child_page_id{-1};
+//   int index{-1};
+//   Page *parent_page{nullptr};
+//   Page *rightmost_child_page{nullptr};
+//   B_PLUS_TREE_INTERNAL_PAGE_TYPE *child_node{nullptr};
+//   B_PLUS_TREE_INTERNAL_PAGE_TYPE *parent_node{nullptr};
+//   int degree{0};
+//   while (parent_page_id != INVALID_PAGE_ID) {
+//     parent_page = buffer_pool_manager->FetchPage(parent_page_id);
+//     parent_node = reinterpret_cast<B_PLUS_TREE_INTERNAL_PAGE_TYPE
+//     *>(parent_page->GetData()); index =
+//     parent_node->ValueIndex(this->GetPageId()); degree++; if (index != 0) {
+//       break;
+//     }
+//     auto parent_page_id_to_delete = parent_page_id;
+//     parent_page_id = parent_node->GetParentPageId();
+//     buffer_pool_manager->UnpinPage(parent_page_id_to_delete, false);
+//   }
+//   assert(index != 0);
+//   rightmost_child_page_id = parent_node->ValueAt(parent_node->GetSize() - 1);
+//   buffer_pool_manager->UnpinPage(parent_page_id, false);
+//   degree--;
+//   while (degree) {
+//     rightmost_child_page =
+//     buffer_pool_manager->FetchPage(rightmost_child_page_id); child_node =
+//     reinterpret_cast<B_PLUS_TREE_INTERNAL_PAGE_TYPE
+//     *>(rightmost_child_page->GetData()); auto page_to_unpin =
+//     rightmost_child_page_id; rightmost_child_page_id =
+//     child_node->ValueAt(child_node->GetSize() - 1); degree--;
+//     buffer_pool_manager->UnpinPage(page_to_unpin, false);
+//   }
+//   return rightmost_child_page_id;
+// }
+
 }  // namespace bustub

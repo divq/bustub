@@ -68,6 +68,7 @@ class BPlusTreeLeafPage : public BPlusTreePage {
 
   // BPlusTreeLeafPage *GetParentNode(Page *&parent_page_pointer);
   KeyType GetMiddleKey() { return array[this->GetSize() / 2].first; }
+  // page_id_t GetPreviousPageId(BufferPoolManager *buffer_pool_manager);
 
  private:
   void CopyNFrom(MappingType *items, int size);

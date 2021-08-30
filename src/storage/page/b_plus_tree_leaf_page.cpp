@@ -152,6 +152,7 @@ void B_PLUS_TREE_LEAF_PAGE_TYPE::CopyNFrom(MappingType *items, int size) {
   for (int i = 0; i < size; i++) {
     array[i + this->GetSize()] = items[i];
   }
+  this->IncreaseSize(size);
 }
 
 /*****************************************************************************
@@ -205,11 +206,15 @@ int B_PLUS_TREE_LEAF_PAGE_TYPE::RemoveAndDeleteRecord(const KeyType &key, const 
  * MERGE
  *****************************************************************************/
 /*
- * Remove all of key & value pairs from this page to "recipient" page. Don't forget
- * to update the next_page id in the sibling page
+ * Remove all of key & value pairs from this page to "recipient" page. Don't
+ * forget to update the next_page id in the sibling page
  */
 INDEX_TEMPLATE_ARGUMENTS
-void B_PLUS_TREE_LEAF_PAGE_TYPE::MoveAllTo(BPlusTreeLeafPage *recipient) {}
+void B_PLUS_TREE_LEAF_PAGE_TYPE::MoveAllTo(BPlusTreeLeafPage *recipient) {
+  recipient->CopyNFrom(array, this->GetSize());
+  recipient->SetNextPageId(this->GetNextPageId());
+  this->SetSize(0);
+}
 
 /*****************************************************************************
  * REDISTRIBUTE
@@ -218,29 +223,82 @@ void B_PLUS_TREE_LEAF_PAGE_TYPE::MoveAllTo(BPlusTreeLeafPage *recipient) {}
  * Remove the first key & value pair from this page to "recipient" page.
  */
 INDEX_TEMPLATE_ARGUMENTS
-void B_PLUS_TREE_LEAF_PAGE_TYPE::MoveFirstToEndOf(BPlusTreeLeafPage *recipient) {}
+void B_PLUS_TREE_LEAF_PAGE_TYPE::MoveFirstToEndOf(BPlusTreeLeafPage *recipient) {
+  recipient->CopyLastFrom(array[0]);
+  for (int i = 0; i < this->GetSize() - 1; i++) {
+    array[i] = array[i + 1];
+  }
+  this->IncreaseSize(-1);
+}
 
 /*
  * Copy the item into the end of my item list. (Append item to my array)
  */
 INDEX_TEMPLATE_ARGUMENTS
-void B_PLUS_TREE_LEAF_PAGE_TYPE::CopyLastFrom(const MappingType &item) {}
+void B_PLUS_TREE_LEAF_PAGE_TYPE::CopyLastFrom(const MappingType &item) {
+  array[this->GetSize()] = item;
+  this->IncreaseSize(1);
+}
 
 /*
  * Remove the last key & value pair from this page to "recipient" page.
  */
 INDEX_TEMPLATE_ARGUMENTS
-void B_PLUS_TREE_LEAF_PAGE_TYPE::MoveLastToFrontOf(BPlusTreeLeafPage *recipient) {}
+void B_PLUS_TREE_LEAF_PAGE_TYPE::MoveLastToFrontOf(BPlusTreeLeafPage *recipient) {
+  recipient->CopyFirstFrom(array[this->GetSize() - 1]);
+  this->IncreaseSize(-1);
+}
 
 /*
  * Insert item at the front of my items. Move items accordingly.
  */
 INDEX_TEMPLATE_ARGUMENTS
-void B_PLUS_TREE_LEAF_PAGE_TYPE::CopyFirstFrom(const MappingType &item) {}
+void B_PLUS_TREE_LEAF_PAGE_TYPE::CopyFirstFrom(const MappingType &item) {
+  for (int i = this->GetSize(); i > 0; i--) {
+    array[i] = array[i - 1];
+  }
+  array[0] = item;
+  this->IncreaseSize(1);
+}
 
 // INDEX_TEMPLATE_ARGUMENTS
-// B_PLUS_TREE_LEAF_PAGE_TYPE *B_PLUS_TREE_LEAF_PAGE_TYPE::GetParentNode(Page *&parent_page_pointer) {
-//   parent_page_pointer;
+// page_id_t B_PLUS_TREE_LEAF_PAGE_TYPE::GetPreviousPageId(BufferPoolManager
+// *buffer_pool_manager) {
+//     typedef BPlusTreePage<KeyType, ValueType, KeyComparator>
+//     B_PLUS_TREE_INTERNAL_PAGE_TYPE;
+//   assert(!this->IsRootPage());
+//   page_id_t parent_page_id = this->GetParentPageId();
+//   page_id_t rightmost_child_page_id{-1};
+//   Page *parent_page{nullptr};
+//   Page *rightmost_child_page{nullptr};
+//   B_PLUS_TREE_INTERNAL_PAGE_TYPE *child_node{nullptr};
+//   B_PLUS_TREE_INTERNAL_PAGE_TYPE *parent_node{nullptr};
+//   int degree{0};
+//   while (parent_page_id != INVALID_PAGE_ID) {
+//     parent_page = buffer_pool_manager->FetchPage(parent_page_id);
+//     parent_node = reinterpret_cast<B_PLUS_TREE_INTERNAL_PAGE_TYPE
+//     *>(parent_page->GetData()); auto index =
+//     parent_node->ValueIndex(this->GetPageId()); degree++; if (index != 0) {
+//       break;
+//     }
+//     auto parent_page_id_to_delete = parent_page_id;
+//     parent_page_id = parent_node->GetParentPageId();
+//     buffer_pool_manager->UnpinPage(parent_page_id_to_delete, false);
+//   }
+//   assert(index != 0);
+//   rightmost_child_page_id = parent_node->ValueAt(parent_node->GetSize() - 1);
+//   buffer_pool_manager->UnpinPage(parent_page_id, false);
+//   degree--;
+//   while (degree) {
+//     rightmost_child_page =
+//     buffer_pool_manager->FetchPage(rightmost_child_page_id); child_node =
+//     reinterpret_cast<B_PLUS_TREE_INTERNAL_PAGE_TYPE
+//     *>(rightmost_child_page->GetData()); auto page_to_unpin =
+//     rightmost_child_page_id; rightmost_child_page_id =
+//     child_node->ValueAt(child_node->GetSize() - 1); degree--;
+//     buffer_pool_manager->UnpinPage(page_to_unpin, false);
+//   }
+//   return rightmost_child_page_id;
 // }
 
 template class BPlusTreeLeafPage<GenericKey<4>, RID, GenericComparator<4>>;
